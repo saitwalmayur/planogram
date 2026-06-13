@@ -600,6 +600,47 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  public duplicateObject(): void {
+    if (!this.contextMenu.targetId) return;
+
+    const sourceData = this.findObjectData(this.contextMenu.targetId);
+    if (!sourceData) return;
+
+    // Serialize the original object to capture its state, then generate a new UUID
+    const serialized = this.serializeObjectList([sourceData])[0];
+    const newId = THREE.MathUtils.generateUUID();
+    
+    serialized.id = newId;
+    serialized.name += " (Copy)";
+    // Offset the position slightly so the duplicate is visible
+    serialized.position.x += 0.2;
+    serialized.position.z += 0.2;
+
+    const newObjects = this.deserializeObjectList([serialized]);
+    const newObjData = newObjects[0];
+
+    // Handle scene hierarchy and placement in the data list
+    const parentMesh = sourceData.mesh.parent;
+    if (!parentMesh || parentMesh === this.scene) {
+      this.scene.add(newObjData.mesh);
+      this.objectDataList.push(newObjData);
+    } else {
+      parentMesh.add(newObjData.mesh);
+      const parentId = parentMesh.userData['rootId'] || parentMesh.uuid;
+      const parentData = this.findObjectData(parentId);
+      if (parentData) {
+        parentData.children = parentData.children || [];
+        parentData.children.push(newObjData);
+      }
+    }
+
+    this.addToInteractableRecursive(newObjData);
+    this.saveScene();
+    this.selectObjectById(newId);
+    this.contextMenu.visible = false;
+    this.cdr.detectChanges();
+  }
+
   public deleteObject(): void {
     if (this.contextMenu.targetId) {
        this.removeObjectRecursively(this.contextMenu.targetId);
