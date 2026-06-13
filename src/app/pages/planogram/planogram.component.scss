@@ -137,6 +137,7 @@
 .hierarchy-item {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
@@ -145,6 +146,25 @@
   color: #cbd5e1;
   transition: all 0.2s;
   border: 1px solid transparent;
+
+  .item-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .item-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    
+    &.dimmed {
+      opacity: 0.5;
+      text-decoration: line-through;
+    }
+  }
 
   svg {
     color: #8b5cf6;
@@ -160,6 +180,24 @@
     border-color: #3b82f6;
     color: #fff;
     font-weight: 500;
+  }
+}
+
+.visibility-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+
+  &:hover {
+    color: #cbd5e1;
+    background: rgba(255, 255, 255, 0.1);
   }
 }
 
@@ -228,3 +266,75 @@
   bottom: 0;
   right: 0;
 }
+
+.canvas-overlay {
+  position: absolute;
+  z-index: 10;
+  
+  &.top-right {
+    top: 1rem;
+    right: 1rem;
+  }
+}
+
+.toggle-btn {
+  background: rgba(30, 41, 59, 0.85);
+  backdrop-filter: blur(4px);
+  border: 1px solid #475569;
+  color: #e2e8f0;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+  min-width: 120px;
+  
+  strong {
+    color: #38bdf8;
+    margin-left: 4px;
+  }
+  
+  &:hover {
+    background: rgba(51, 65, 85, 0.95);
+    border-color: #64748b;
+  }
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
+  min-width: 150px;
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 4px 0;
+
+    li {
+      padding: 8px 16px;
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.15s;
+
+      &:hover {
+        background-color: #3b82f6;
+        color: white;
+      }
+
+      &.text-danger {
+        color: #f87171;
+        
+        &:hover {
+          background-color: #ef4444;
+          color: white;
+        }
+      }
+    }
+  }
+}
+
