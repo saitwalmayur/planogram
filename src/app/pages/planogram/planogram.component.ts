@@ -5,6 +5,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { PropertiesPanelComponent } from './properties-panel/properties-panel.component';
 
 interface SceneObjectData {
@@ -31,6 +35,8 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
   private isBrowser: boolean;
   private controls!: OrbitControls;
   private transformControl!: TransformControls;
+  private composer!: EffectComposer;
+  private outlinePass!: OutlinePass;
 
   private viewCubeScene!: THREE.Scene;
   private viewCubeCamera!: THREE.PerspectiveCamera;
@@ -114,6 +120,9 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
       this.camera.aspect = container.clientWidth / container.clientHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(container.clientWidth, container.clientHeight);
+      if (this.composer) {
+        this.composer.setSize(container.clientWidth, container.clientHeight);
+      }
     }
   }
 
@@ -268,6 +277,9 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
          if (type === 'door') {
            this.snapDoors();
            this.updateTransformViewFromModel();
+         } else if (type === 'shelf') {
+           this.snapShelfToTarget();
+           this.updateTransformViewFromModel();
          } else if (type === 'cupboard') {
            this.snapCupboardToDoors();
            this.updateTransformViewFromModel();
@@ -281,6 +293,26 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     // Initialize state
     this.transformControl.setSpace(this.transformSpace);
     this.updateSnapSettings();
+
+    // Setup Post-processing for Selection Outline
+    this.composer = new EffectComposer(this.renderer);
+    const renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(renderPass);
+
+    this.outlinePass = new OutlinePass(
+      new THREE.Vector2(container.clientWidth, container.clientHeight),
+      this.scene,
+      this.camera
+    );
+    this.outlinePass.edgeStrength = 3.0;
+    this.outlinePass.edgeGlow = 0.5;
+    this.outlinePass.edgeThickness = 1.0;
+    this.outlinePass.visibleEdgeColor.set('#3b82f6'); // Highlight blue
+    this.outlinePass.hiddenEdgeColor.set('#1e293b');  // Darker shade for hidden edges
+    this.composer.addPass(this.outlinePass);
+
+    const outputPass = new OutputPass();
+    this.composer.addPass(outputPass);
 
     // View Cube Setup
     this.viewCubeScene = new THREE.Scene();
@@ -312,7 +344,9 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
       if (this.controls) {
         const distance = this.camera.position.distanceTo(this.controls.target);
         const offset = new THREE.Vector3(0, 0, distance);
-        offset.applyQuaternion(event.quaternion);
+        // The camera's position relative to the target is the inverse of the cube's orientation
+        const q = event.quaternion.clone().invert();
+        offset.applyQuaternion(q);
         this.camera.position.copy(this.controls.target).add(offset);
         this.camera.lookAt(this.controls.target);
         this.controls.update();
@@ -406,6 +440,8 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
         }
       });
 
+      this.outlinePass.selectedObjects = [this.selectedObject.mesh];
+
       if (this.currentTransformMode !== 'select') {
         this.transformControl.attach(this.selectedObject.mesh);
         this.transformControl.setMode(this.currentTransformMode as any);
@@ -415,6 +451,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
 
       this.updateTransformViewFromModel();
     } else {
+      this.outlinePass.selectedObjects = [];
       this.transformControl.detach();
     }
     
@@ -600,15 +637,14 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
 
     if (this.viewCubeControls) {
       if (!this.viewCubeControls['_animation']) {
-        this.viewCubeControls.setQuaternion(this.camera.quaternion);
+        // The cube represents the scene orientation, which is the inverse of the camera's view rotation
+        this.viewCubeControls.setQuaternion(this.camera.quaternion.clone().invert());
       }
       this.viewCubeControls.update();
     }
 
     if (this.renderer && this.scene && this.camera) {
-      this.renderer.autoClear = false;
-      this.renderer.clear();
-      this.renderer.render(this.scene, this.camera);
+      this.composer.render();
 
       if (this.viewCubeScene && this.viewCubeCamera && this.viewCubeRenderer) {
         this.viewCubeRenderer.render(this.viewCubeScene, this.viewCubeCamera);
@@ -1040,6 +1076,62 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
      mesh.userData['type'] = type;
      applyShadowFlags(mesh);
      return mesh;
+  }
+
+  private moveObjectInDataList(childId: string, newParentId: string): void {
+    const childData = this.findObjectData(childId);
+    if (!childData) return;
+
+    this.removeFromObjectDataList(childId);
+
+    const parentData = this.findObjectData(newParentId);
+    if (parentData) {
+      parentData.children = parentData.children || [];
+      parentData.children.push(childData);
+    } else {
+      this.objectDataList.push(childData);
+    }
+  }
+
+  private snapShelfToTarget(): void {
+    const shelf = this.selectedObject?.mesh;
+    if (!shelf || shelf.userData['type'] !== 'shelf') return;
+
+    shelf.updateMatrixWorld(true);
+    const shelfBox = new THREE.Box3().setFromObject(shelf);
+    
+    // Filter potential parent targets (Cupboards and Doors)
+    const targets = this.interactableObjects.filter(obj => 
+      (obj.userData['type'] === 'cupboard' || obj.userData['type'] === 'door') && obj !== shelf
+    );
+
+    let targetParent: THREE.Object3D | null = null;
+    for (const target of targets) {
+      target.updateMatrixWorld(true);
+      const targetBox = new THREE.Box3().setFromObject(target);
+      if (shelfBox.intersectsBox(targetBox)) {
+        targetParent = target;
+        break;
+      }
+    }
+
+    const currentParent = shelf.parent;
+    if (targetParent && targetParent !== currentParent) {
+      const worldPos = new THREE.Vector3();
+      shelf.getWorldPosition(worldPos);
+
+      targetParent.add(shelf);
+      targetParent.updateMatrixWorld(true);
+      targetParent.worldToLocal(worldPos);
+      shelf.position.copy(worldPos);
+      
+      if (targetParent.userData['type'] === 'door') {
+        shelf.quaternion.set(0, 0, 0, 1);
+      }
+
+      this.moveObjectInDataList(shelf.uuid, targetParent.uuid);
+      this.transformControl.attach(shelf);
+    }
   }
 
   private snapDoors(): void {
@@ -1491,4 +1583,3 @@ const EDGE_FACES_SIDE = [
   { name: FACES.FRONT_RIGHT_EDGE }, { name: FACES.BACK_RIGHT_EDGE }, { name: FACES.BACK_LEFT_EDGE }, { name: FACES.FRONT_LEFT_EDGE }
 ];
 const CUBE_FACES = [...BOX_FACES, ...CORNER_FACES, ...EDGE_FACES, ...EDGE_FACES_SIDE];
-
