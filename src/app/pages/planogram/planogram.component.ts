@@ -74,6 +74,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
   };
 
   public snapEnabled = true;
+  public is2DMode = false;
 
   constructor(
     @Inject(PLATFORM_ID) platformId: Object,
@@ -598,6 +599,58 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
        this.saveScene();
        this.cdr.detectChanges();
     }
+  }
+
+  /**
+   * Toggles between 3D Room view and 2D Linear view.
+   * In 2D Mode, all layout units (cupboards, doors) are arranged in a straight line.
+   */
+  public toggleDimensionMode(): void {
+    this.is2DMode = !this.is2DMode;
+
+    // Identify root layout objects (those attached directly to the scene)
+    const layoutObjects = this.interactableObjects.filter(obj => 
+      (obj.userData['type'] === 'cupboard' || obj.userData['type'] === 'door') && 
+      (!obj.parent || obj.parent === this.scene)
+    );
+
+    if (this.is2DMode) {
+      // Sort by existing X position to keep the "unwrapping" logical
+      layoutObjects.sort((a, b) => a.position.x - b.position.x || a.position.z - b.position.z);
+
+      let currentX = 0;
+      const gap = 0;
+
+      layoutObjects.forEach(obj => {
+        // Save 3D state
+        obj.userData['originalTransform'] = {
+          position: obj.position.clone(),
+          rotation: obj.rotation.clone()
+        };
+
+        // Arrange in a single line
+        obj.rotation.set(0, 0, 0);
+        
+        // Get actual width of the mesh for precise spacing
+        const box = new THREE.Box3().setFromObject(obj);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        
+        obj.position.set(currentX + size.x / 2, obj.position.y, 0);
+        currentX += size.x + gap;
+      });
+    } else {
+      // Restore original 3D room layout
+      layoutObjects.forEach(obj => {
+        const original = obj.userData['originalTransform'];
+        if (original) {
+          obj.position.copy(original.position);
+          obj.rotation.copy(original.rotation);
+          delete obj.userData['originalTransform'];
+        }
+      });
+    }
+    this.cdr.detectChanges();
   }
 
   public duplicateObject(): void {

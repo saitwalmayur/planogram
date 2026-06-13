@@ -52,6 +52,10 @@
       <!-- Overlay UI -->
       <div class="canvas-overlay top-right">
         <div class="settings-row">
+          <button class="toggle-btn" (click)="toggleDimensionMode()" [class.active]="is2DMode" title="Toggle 2D/3D Mode">
+            View: <strong>{{ is2DMode ? '2D (Linear)' : '3D (Room)' }}</strong>
+          </button>
+
           <button class="toggle-btn" (click)="toggleTransformSpace()" title="Toggle Transform Space (Local/World)">
             Space: <strong>{{ transformSpace | titlecase }}</strong>
           </button>
@@ -103,6 +107,9 @@
       <li *ngIf="contextMenu.targetType === 'cupboard'" (click)="duplicateObject()">
   Duplicate Door
 </li>
+      <li *ngIf="contextMenu.targetType === 'door' || contextMenu.targetType === 'cupboard'" (click)="duplicateObject()">
+        Duplicate {{ contextMenu.targetType | titlecase }}
+      </li>
     </ul>
   </div>
 </div>
