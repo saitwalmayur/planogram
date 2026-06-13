@@ -87,10 +87,11 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
       // Wait for the next tick to ensure parent container dimensions are calculated
       setTimeout(() => {
         this.initThreeJsScene();
-        this.renderer.domElement.addEventListener('click', this.onPointerDown.bind(this));
+        this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown.bind(this));
         this.renderer.domElement.addEventListener('contextmenu', this.onContextMenu.bind(this));
         this.animate();
         this.onWindowResize();
+        this.loadScene();
       }, 0);
     }
   }
@@ -107,7 +108,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
         this.viewCubeRenderer.dispose();
       }
       if (this.renderer) {
-        this.renderer.domElement.removeEventListener('click', this.onPointerDown.bind(this));
+        this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown.bind(this));
         this.renderer.domElement.removeEventListener('contextmenu', this.onContextMenu.bind(this));
         this.renderer.dispose();
       }
@@ -269,6 +270,9 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     this.transformControl = new TransformControls(this.camera, this.renderer.domElement);
     this.transformControl.addEventListener('dragging-changed', (event) => {
       this.controls.enabled = !event.value;
+      if (!event.value) {
+        this.saveScene();
+      }
     });
     this.transformControl.addEventListener('change', () => {
       if (this.selectedObject) {
@@ -290,7 +294,10 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
          this.cdr.detectChanges();
       }
     });
-    this.scene.add(this.transformControl.getHelper()); // Note: Using getHelper() to add the visual gizmo to the scene
+    
+    // In recent Three.js versions, the control itself is not an Object3D. 
+    // We must add its helper to the scene for the gizmo to be visible.
+    this.scene.add(this.transformControl.getHelper());
 
     // Initialize state
     this.transformControl.setSpace(this.transformSpace);
@@ -357,19 +364,20 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
   }
 
   private onPointerDown(event: PointerEvent): void {
-    // Prevent deselection if hovering over transform gizmo
-    if (this.transformControl.axis !== null) {
+    // If clicking on the gizmo itself, let TransformControls handle it
+    if (this.transformControl.dragging || this.transformControl.axis !== null) {
       return;
     }
 
-    const bounds = this.renderer.domElement.getBoundingClientRect();
-    this.mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
-    this.mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
     const intersects = this.raycaster.intersectObjects(this.interactableObjects, true);
 
     if (intersects.length > 0) {
+      event.stopPropagation();
       const firstHit = intersects[0].object;
       const rootId = firstHit.userData['rootId'] || firstHit.uuid;
       this.selectObjectById(rootId);
@@ -380,11 +388,11 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
 
   private onContextMenu(event: MouseEvent): void {
     event.preventDefault();
-    if (!this.isBrowser || this.transformControl.axis !== null) return;
+    if (!this.isBrowser || this.transformControl.dragging) return;
 
-    const bounds = this.renderer.domElement.getBoundingClientRect();
-    this.mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
-    this.mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     this.raycaster.setFromCamera(this.mouse, this.camera);
     const intersects = this.raycaster.intersectObjects(this.interactableObjects, true);
@@ -415,10 +423,22 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
         if (!objData.mesh.visible && this.selectedObject?.id === id) {
             this.selectObjectById(null);
         }
+        this.saveScene();
     }
   }
 
   public selectObjectById(id: string | null): void {
+    const newSelection = id ? (this.findObjectData(id) || null) : null;
+    
+    // If clicking the same object, ensure gizmo is attached and exit
+    if (newSelection === this.selectedObject && id !== null) {
+       if (this.selectedObject && this.currentTransformMode !== 'select') {
+          this.transformControl.setMode(this.currentTransformMode as any);
+          this.transformControl.attach(this.selectedObject.mesh);
+       }
+       return;
+    }
+
     // Reset color for previous
     if (this.selectedObject) {
       this.selectedObject.mesh.traverse((child) => {
@@ -428,25 +448,21 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
       });
     }
     
-    if (id) {
-      this.selectedObject = this.findObjectData(id) || null;
-    } else {
-      this.selectedObject = null;
-    }
+    this.selectedObject = newSelection;
     
     // Highlight current selected and attach gizmo
     if (this.selectedObject) {
       this.selectedObject.mesh.traverse((child) => {
         if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-          child.material.emissive.setHex(0x111111);
+          child.material.emissive.setHex(0x222222); // Slightly brighter highlight
         }
       });
 
       this.outlinePass.selectedObjects = [this.selectedObject.mesh];
 
       if (this.currentTransformMode !== 'select') {
-        this.transformControl.attach(this.selectedObject.mesh);
         this.transformControl.setMode(this.currentTransformMode as any);
+        this.transformControl.attach(this.selectedObject.mesh);
       } else {
         this.transformControl.detach();
       }
@@ -499,6 +515,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
       this.transform.scale.y,
       this.transform.scale.z
     );
+    this.saveScene();
   }
 
   public toggleTransformSpace(): void {
@@ -513,7 +530,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     if (mode === 'select') {
       this.transformControl.detach();
     } else {
-      this.transformControl.setMode(mode);
+      this.transformControl.setMode(mode as any);
       if (this.selectedObject) {
         this.transformControl.attach(this.selectedObject.mesh);
       }
@@ -534,6 +551,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
       
       if (shelf && shelf.userData['type'] === 'shelf') {
         shelf.userData['alignment'] = alignment;
+        this.saveScene();
         this.cdr.detectChanges();
       }
     }
@@ -577,6 +595,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
        }
        
        this.updateTransformViewFromModel();
+       this.saveScene();
        this.cdr.detectChanges();
     }
   }
@@ -585,6 +604,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     if (this.contextMenu.targetId) {
        this.removeObjectRecursively(this.contextMenu.targetId);
        this.contextMenu.visible = false;
+       this.saveScene();
        this.cdr.detectChanges();
     }
   }
@@ -850,6 +870,7 @@ private draggingType: string | null = null;
       } else {
          this.objectDataList.push(objData);
       }
+      this.saveScene();
       this.selectObjectById(mesh.uuid);
     }
 
@@ -1327,6 +1348,92 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
      } else {
         mesh.position.set(position.x, 0.5, position.z);
      }
+  }
+
+  private saveScene(): void {
+    if (!this.isBrowser) return;
+    const serializedData = this.serializeObjectList(this.objectDataList);
+    localStorage.setItem('planogramData', JSON.stringify(serializedData));
+  }
+
+  private serializeObjectList(list: SceneObjectData[]): any[] {
+    return list.map(item => ({
+      id: item.id,
+      name: item.name,
+      type: item.mesh.userData['type'],
+      visible: item.mesh.visible,
+      position: { x: item.mesh.position.x, y: item.mesh.position.y, z: item.mesh.position.z },
+      rotation: { x: item.mesh.rotation.x, y: item.mesh.rotation.y, z: item.mesh.rotation.z },
+      scale: { x: item.mesh.scale.x, y: item.mesh.scale.y, z: item.mesh.scale.z },
+      userData: { ...item.mesh.userData },
+      children: item.children ? this.serializeObjectList(item.children) : []
+    }));
+  }
+
+  private loadScene(): void {
+    if (!this.isBrowser) return;
+    const dataStr = localStorage.getItem('planogramData');
+    if (!dataStr) return;
+
+    try {
+      const data = JSON.parse(dataStr);
+      this.interactableObjects = [];
+      this.objectDataList = this.deserializeObjectList(data);
+      this.rebuildScene(this.objectDataList);
+      this.cdr.detectChanges();
+    } catch (e) {
+      console.error('Failed to load planogram data from local storage', e);
+    }
+  }
+
+  private deserializeObjectList(data: any[]): SceneObjectData[] {
+    return data.map(item => {
+      const mesh = this.createObject3DOnly(item.type);
+      (mesh as any).uuid = item.id; // Restore identity
+      mesh.position.set(item.position.x, item.position.y, item.position.z);
+      mesh.rotation.set(item.rotation.x, item.rotation.y, item.rotation.z);
+      mesh.scale.set(item.scale.x, item.scale.y, item.scale.z);
+      mesh.visible = item.visible !== undefined ? item.visible : true;
+      
+      Object.assign(mesh.userData, item.userData);
+      mesh.userData['rootId'] = item.id;
+      if (!mesh.userData['rootId']) {
+        mesh.userData['rootId'] = item.id;
+      }
+      
+      mesh.traverse(child => {
+        if (!child.userData['rootId']) child.userData['rootId'] = item.id;
+      });
+
+      const childrenData = item.children ? this.deserializeObjectList(item.children) : [];
+      
+      childrenData.forEach(child => {
+        mesh.add(child.mesh);
+        // Ensure children know who their root is for raycasting
+        child.mesh.traverse(c => c.userData['rootId'] = item.id);
+      });
+
+      return {
+        id: item.id,
+        name: item.name,
+        mesh: mesh,
+        children: childrenData
+      };
+    });
+  }
+
+  private rebuildScene(list: SceneObjectData[]): void {
+    list.forEach(item => {
+      if (!item.mesh.parent) {
+        this.scene.add(item.mesh);
+      }
+      this.addToInteractableRecursive(item);
+    });
+  }
+
+  private addToInteractableRecursive(data: SceneObjectData): void {
+    this.interactableObjects.push(data.mesh);
+    data.children?.forEach(child => this.addToInteractableRecursive(child));
   }
 }
 
