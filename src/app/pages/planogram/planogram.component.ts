@@ -9,7 +9,9 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { SceneHierarchy } from './scene-hierarchy.component';
 import { PropertiesPanelComponent } from './properties-panel/properties-panel.component';
+import { TransformToolbarComponent } from './transform-toolbar.component';
 
 interface SceneObjectData {
   id: string;
@@ -20,7 +22,7 @@ interface SceneObjectData {
 
 @Component({
   selector: 'app-planogram',
-  imports: [CommonModule, FormsModule, PropertiesPanelComponent],
+  imports: [CommonModule, FormsModule, PropertiesPanelComponent, SceneHierarchy, TransformToolbarComponent],
   templateUrl: './planogram.component.html',
   styleUrl: './planogram.component.scss'
 })

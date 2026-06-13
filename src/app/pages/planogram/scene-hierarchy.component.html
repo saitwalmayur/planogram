@@ -1,0 +1,35 @@
+<div class="hierarchy-list">
+  <ng-container *ngTemplateOutlet="hierarchyTemplate; context:{ $implicit: objects(), level: 0 }"></ng-container>
+
+  <ng-template #hierarchyTemplate let-list let-level="level">
+    @for (obj of list; track obj.id) {
+      <div class="hierarchy-item" 
+           [class.active]="selectedId() === obj.id"
+           [style.paddingLeft.px]="10 + level * 15"
+           (click)="objectSelected.emit(obj.id); $event.stopPropagation()">
+           <div class="item-content">
+             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+             <span class="item-name" [class.dimmed]="!obj.mesh.visible">{{ obj.name }}</span>
+           </div>
+           <button class="visibility-btn" (click)="onToggleVisibility($event, obj.id)" title="Toggle Visibility">
+             @if (obj.mesh.visible) {
+               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+             }
+             @if (!obj.mesh.visible) {
+               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+             }
+           </button>
+      </div>
+      
+      @if (obj.children && obj.children.length > 0) {
+        <ng-container *ngTemplateOutlet="hierarchyTemplate; context:{ $implicit: obj.children, level: level + 1 }"></ng-container>
+      }
+    }
+  </ng-template>
+  
+  @if (objects().length === 0) {
+    <div class="empty-state sm">
+      Scene is empty.
+    </div>
+  }
+</div>

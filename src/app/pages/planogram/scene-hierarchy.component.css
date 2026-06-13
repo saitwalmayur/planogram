@@ -1,0 +1,42 @@
+.hierarchy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hierarchy-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.hierarchy-item:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.hierarchy-item.active {
+  background-color: #e3f2fd;
+  color: #1976d2;
+}
+
+.item-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.item-name.dimmed {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.visibility-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+}
