@@ -1,8 +1,6 @@
-# TODO
-
-- [x] Adjust Home page layout to be truly full screen (no empty right/left space) by fixing `.home-container` width/padding and centering.
-
-- [ ] Update `home.component.scss` to remove `max-width: 1440px`/`padding: 0 5%` constraints and make hero use full viewport width with proper gap.
-- [ ] Ensure header/main/hero heights align to fill `100vh`.
-- [ ] Run `npm test/build` or `ng serve` (if available) to verify rendering.
+- [x] Fix “cupboard not showing shadow” by enabling `castShadow`/`receiveShadow` on dynamically created meshes.
+- [x] Apply ground normal map using `/Texture/wood_floor_diff_1k_NRM.png`.
+- [x] Fix door snapping: call `snapDoors()` while dragging doors and refresh transform afterwards.
+- [ ] Create vertical toolbar (right side below Space button): Select / Move / Scale / Rotate.
+- [ ] Add toolbar logic: Select detaches/hides TransformControls; Move/Scale/Rotate attach gizmo + synchronize active button state.
 

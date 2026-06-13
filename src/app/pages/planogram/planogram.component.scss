@@ -270,10 +270,15 @@
 .canvas-overlay {
   position: absolute;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
   
   &.top-right {
     top: 1rem;
     right: 1rem;
+    align-items: flex-end;
   }
 }
 
@@ -287,7 +292,8 @@
   cursor: pointer;
   font-size: 0.85rem;
   transition: all 0.2s ease;
-  min-width: 120px;
+  min-width: 100px;
+  pointer-events: auto;
   
   strong {
     color: #38bdf8;
@@ -297,6 +303,54 @@
   &:hover {
     background: rgba(51, 65, 85, 0.95);
     border-color: #64748b;
+  }
+}
+
+.settings-row {
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.transform-toolbar {
+  display: flex;
+  flex-direction: column;
+  background: rgba(30, 41, 59, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid #475569;
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+
+  .tool-btn {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    &.active {
+      background: #3b82f6;
+      color: #fff;
+    }
   }
 }
 
@@ -337,4 +391,3 @@
     }
   }
 }
-

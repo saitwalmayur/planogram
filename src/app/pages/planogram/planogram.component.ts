@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { PropertiesPanelComponent } from './properties-panel/properties-panel.component';
 
 interface SceneObjectData {
@@ -40,6 +41,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
   public selectedObject: SceneObjectData | null = null;
   public objectDataList: SceneObjectData[] = [];
   public transformSpace: 'local' | 'world' = 'local';
+  public currentTransformMode: 'translate' | 'rotate' | 'scale' | 'select' = 'translate';
   
   // Context Menu State
   public contextMenu = {
@@ -57,6 +59,8 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     scale: { x: 1, y: 1, z: 1 }
   };
 
+  public snapEnabled = true;
+
   constructor(
     @Inject(PLATFORM_ID) platformId: Object,
     private cdr: ChangeDetectorRef
@@ -66,18 +70,14 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit(): void {
     if (this.isBrowser) {
-      this.initThreeJsScene();
-      
-      // Bind click handler specifically to canvas
-      this.renderer.domElement.addEventListener('click', this.onPointerDown.bind(this));
-      this.renderer.domElement.addEventListener('contextmenu', this.onContextMenu.bind(this));
-      
-      this.animate();
-
-      // Force layout resize explicitly in case flexbox computed elements dynamically (fixes 0x0 canvas bug)
+      // Wait for the next tick to ensure parent container dimensions are calculated
       setTimeout(() => {
+        this.initThreeJsScene();
+        this.renderer.domElement.addEventListener('click', this.onPointerDown.bind(this));
+        this.renderer.domElement.addEventListener('contextmenu', this.onContextMenu.bind(this));
+        this.animate();
         this.onWindowResize();
-      }, 50);
+      }, 0);
     }
   }
 
@@ -98,6 +98,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
   onWindowResize(): void {
     if (this.isBrowser && this.camera && this.renderer) {
       const container = this.canvasContainer.nativeElement;
+      if (container.clientWidth === 0 || container.clientHeight === 0) return;
       this.camera.aspect = container.clientWidth / container.clientHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(container.clientWidth, container.clientHeight);
@@ -110,13 +111,16 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     
     switch (event.key.toLowerCase()) {
       case 'w':
-        this.transformControl.setMode('translate');
+        this.setTransformMode('translate');
         break;
       case 'e':
-        this.transformControl.setMode('scale');
+        this.setTransformMode('scale');
         break;
       case 'r':
-        this.transformControl.setMode('rotate');
+        this.setTransformMode('rotate');
+        break;
+      case 'escape':
+        this.setTransformMode('select');
         break;
     }
   }
@@ -142,57 +146,96 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
-    // TransformControls setup
-    this.transformControl = new TransformControls(this.camera, this.renderer.domElement);
-    this.transformControl.addEventListener('dragging-changed', (event) => {
-      this.controls.enabled = !event.value;
-    });
-    this.transformControl.addEventListener('change', () => {
-      if (this.selectedObject) {
-         this.updateTransformViewFromModel();
-         this.cdr.detectChanges();
-      }
-    });
-    this.scene.add(this.transformControl.getHelper());
+    // HDRI environment (for realistic reflections)
+    const hdriPath = '/HDRI/monochrome_studio_02_4k.hdr';
+  new RGBELoader().load(hdriPath, (texture) => {
+  texture.mapping = THREE.EquirectangularReflectionMapping;
 
-    // Initial space
-    this.transformControl.setSpace(this.transformSpace);
+  this.scene.environment = texture;
+  this.scene.background = texture; // Show HDRI in viewport
 
-    // Initial light
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  this.renderer.toneMappingExposure = 1.0;
+
+  setTimeout(() => this.cdr.detectChanges());
+});
+
+    // Lighting (more realistic)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
     this.scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(10, 20, 10);
-    this.scene.add(directionalLight);
+    // Enable shadows for main lights
+    const enableShadow = (light: THREE.Light & { castShadow?: boolean }) => {
+      (light as any).castShadow = true;
+      (light as any).shadow.mapSize.width = 1024;
+      (light as any).shadow.mapSize.height = 1024;
+      (light as any).shadow.bias = -0.0001;
+      (light as any).shadow.radius = 2;
+    };
+
+
+
+    // Warm key light
+    const keyLight = new THREE.DirectionalLight(0xfff2e6, 1.1);
+    keyLight.position.set(6, 12, 8);
+    enableShadow(keyLight);
+    this.scene.add(keyLight);
+
+    // Cool fill light
+    const fillLight = new THREE.DirectionalLight(0xcfe8ff, 0.55);
+    fillLight.position.set(-8, 6, -6);
+    enableShadow(fillLight);
+    this.scene.add(fillLight);
+
+    // Subtle rim light
+    const rimLight = new THREE.DirectionalLight(0xb7ffd6, 0.25);
+    rimLight.position.set(0, 10, -12);
+    enableShadow(rimLight);
+    this.scene.add(rimLight);
+
+
+    // Gentle ground bounce
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x0f172a, 0.25);
+    hemiLight.position.set(0, 3, 0);
+    this.scene.add(hemiLight);
+
 
     // Grid helper
-    const gridHelper = new THREE.GridHelper(10, 10, 0x475569, 0x334155);
+    const gridHelper = new THREE.GridHelper(20, 20, 0x475569, 0x334155);
     this.scene.add(gridHelper);
 
-    // Cube
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshStandardMaterial({ 
-      color: '#38bdf8', 
-      roughness: 0.2, 
-      metalness: 0.5 
+    // Ground plane with wood floor texture
+    const textureLoader = new THREE.TextureLoader();
+
+    const floorTex = textureLoader.load('/Texture/wood_floor_diff_1k.jpg');
+    const floorNrmTex = textureLoader.load('/Texture/wood_floor_diff_1k_NRM.png');
+
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    floorNrmTex.wrapS = floorNrmTex.wrapT = THREE.RepeatWrapping;
+    floorTex.repeat.set(8, 8);
+    floorNrmTex.repeat.set(8, 8);
+
+    const groundGeo = new THREE.PlaneGeometry(50, 50);
+    const groundMat = new THREE.MeshStandardMaterial({
+      map: floorTex,
+      normalMap: floorNrmTex,
+      roughness: 0.95,
+      metalness: 0.0
     });
 
-    this.rootCube = new THREE.Mesh(geometry, material);
-    this.rootCube.userData['rootId'] = this.rootCube.uuid;
-    this.rootCube.position.set(0, 0.5, 0); // place it logically on grid
-    this.scene.add(this.rootCube);
-    
-    // Register interactable
-    this.interactableObjects.push(this.rootCube);
-    this.objectDataList.push({
-      id: this.rootCube.uuid,
-      name: 'Standard Cube',
-      mesh: this.rootCube,
-      children: []
-    });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = 0;
+    ground.receiveShadow = true;
+    this.scene.add(ground);
+
+
+
+    // Default cube removed (scene starts empty; user adds objects from Library).
 
     // OrbitControls setup
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -207,10 +250,21 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     this.transformControl.addEventListener('change', () => {
       if (this.selectedObject) {
          this.updateTransformViewFromModel();
+
+         // Snap doors while dragging, so releasing lands perfectly.
+         if (this.selectedObject.mesh.userData['type'] === 'door') {
+           this.snapDoors();
+           this.updateTransformViewFromModel();
+         }
+
          this.cdr.detectChanges();
       }
     });
     this.scene.add(this.transformControl.getHelper()); // Note: Using getHelper() to add the visual gizmo to the scene
+
+    // Initialize state
+    this.transformControl.setSpace(this.transformSpace);
+    this.updateSnapSettings();
   }
 
   private onPointerDown(event: PointerEvent): void {
@@ -298,7 +352,14 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
           child.material.emissive.setHex(0x111111);
         }
       });
-      this.transformControl.attach(this.selectedObject.mesh);
+
+      if (this.currentTransformMode !== 'select') {
+        this.transformControl.attach(this.selectedObject.mesh);
+        this.transformControl.setMode(this.currentTransformMode as any);
+      } else {
+        this.transformControl.detach();
+      }
+
       this.updateTransformViewFromModel();
     } else {
       this.transformControl.detach();
@@ -351,6 +412,39 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
   public toggleTransformSpace(): void {
     this.transformSpace = this.transformSpace === 'local' ? 'world' : 'local';
     this.transformControl.setSpace(this.transformSpace);
+  }
+
+  public setTransformMode(mode: 'translate' | 'rotate' | 'scale' | 'select'): void {
+    this.currentTransformMode = mode;
+    if (!this.transformControl) return;
+
+    if (mode === 'select') {
+      this.transformControl.detach();
+    } else {
+      this.transformControl.setMode(mode);
+      if (this.selectedObject) {
+        this.transformControl.attach(this.selectedObject.mesh);
+      }
+    }
+    this.cdr.detectChanges();
+  }
+
+  public toggleSnap(): void {
+    this.snapEnabled = !this.snapEnabled;
+    this.updateSnapSettings();
+  }
+
+  private updateSnapSettings(): void {
+    if (!this.transformControl) return;
+    if (this.snapEnabled) {
+      this.transformControl.setTranslationSnap(0.25);
+      this.transformControl.setRotationSnap(THREE.MathUtils.degToRad(15));
+      this.transformControl.setScaleSnap(0.1);
+    } else {
+      this.transformControl.setTranslationSnap(null);
+      this.transformControl.setRotationSnap(null);
+      this.transformControl.setScaleSnap(null);
+    }
   }
 
   public distributeShelves(): void {
@@ -591,6 +685,7 @@ if (cupboardHit && this.draggingType === 'shelf') {
       else if (type === 'shelf') name = 'Rectangle Shelf';
       else if (type === 'cupboard') name = 'Open Cupboard';
       else if (type === 'chest') name = 'Storage Chest';
+      else if (type === 'door') name = 'Door';
 
       // Add to interactableObjects so nested shelves can be selected/transformed.
       this.interactableObjects.push(mesh);
@@ -742,6 +837,25 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
 
 
   private createObject3DOnly(type: string): THREE.Object3D {
+     const applyShadowFlags = (obj: THREE.Object3D): void => {
+       obj.traverse((child) => {
+         if (child instanceof THREE.Mesh) {
+           child.castShadow = true;
+           child.receiveShadow = true;
+         }
+       });
+     };
+
+     if (type === 'door') {
+       // Simple door leaf (box) centered at origin; snapping will align edge-to-edge.
+       const geometry = new THREE.BoxGeometry(0.9, 2, 0.05);
+       const material = new THREE.MeshStandardMaterial({ color: '#fbbf24', roughness: 0.25, metalness: 0.3 });
+       const mesh = new THREE.Mesh(geometry, material);
+       mesh.userData['type'] = 'door';
+       applyShadowFlags(mesh);
+       return mesh;
+     }
+
      if (type === 'cupboard') {
        const group = new THREE.Group();
        group.userData['type'] = 'cupboard';
@@ -760,11 +874,13 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
        const bottom = new THREE.Mesh(new THREE.BoxGeometry(1, 0.02, 1), material);
        bottom.position.set(0, 0.01, 0);
        
-       const back = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 0.02), material);
-       back.position.set(0, 1, -0.49);
+       const back = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 0.01), material);
+       back.position.set(0, 1, -0.495);
        
        group.add(left, right, top, bottom, back);
-       // We center the group natively around 0,0,0 initially if we want, but anchoring solves it later
+       // Ensure all cupboard parts cast/receive shadows.
+       // Ensure all cupboard parts cast/receive shadows.
+       applyShadowFlags(group);
        return group;
      }
 
@@ -775,8 +891,8 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
        geometry = new THREE.BoxGeometry(1, 0.02, 1);
        materialColor = '#8b5cf6';
      } else if (type === 'chest') {
-       geometry = new THREE.BoxGeometry(1, 0.8, 0.6);
-       materialColor = '#f87171';
+       geometry = new THREE.BoxGeometry(1, 0.1, 0.6);
+       materialColor = '#ffc2c2';
      } else {
        geometry = new THREE.BoxGeometry(1, 1, 1);
        materialColor = '#38bdf8';
@@ -787,7 +903,107 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
      });
      const mesh = new THREE.Mesh(geometry, material);
      mesh.userData['type'] = type;
+     applyShadowFlags(mesh);
      return mesh;
+  }
+
+  private snapDoors(): void {
+    // Snap doors that are close and similarly oriented.
+    const doors = this.interactableObjects.filter(o => o.userData['type'] === 'door');
+    if (doors.length < 2) return;
+
+    // Only snap if the user is currently manipulating a door (prevents jitter).
+    const moving = this.selectedObject?.mesh;
+    if (!moving || moving.userData['type'] !== 'door') return;
+
+    // World-space boxes for robust edge matching.
+    moving.updateMatrixWorld(true);
+
+    const movingBox = new THREE.Box3().setFromObject(moving);
+    const eps = 0.15; // snapping threshold in world units
+
+    // Door orientation: since the door leaf is a flat box, we align by its normal axis.
+    // We consider local Z (box thickness axis) after rotation.
+    const movingWorldNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(moving.quaternion).normalize();
+
+    let best: { other: THREE.Object3D; snapAxis: 'x' | 'z'; dist: number } | null = null;
+
+    for (const other of doors) {
+      if (other === moving) continue;
+      other.updateMatrixWorld(true);
+
+      const otherBox = new THREE.Box3().setFromObject(other);
+
+      // Rotation compatibility: normals should be nearly the same (or opposite) => same facing.
+      const dot = Math.abs(movingWorldNormal.dot(new THREE.Vector3(0, 0, 1).applyQuaternion(other.quaternion).normalize()));
+      if (dot < 0.9) continue;
+
+      // Candidate snap along X or Z based on edge proximity.
+      const dx1 = Math.abs(movingBox.min.x - otherBox.max.x);
+      const dx2 = Math.abs(movingBox.max.x - otherBox.min.x);
+      const dz1 = Math.abs(movingBox.min.z - otherBox.max.z);
+      const dz2 = Math.abs(movingBox.max.z - otherBox.min.z);
+
+      const bestXDist = Math.min(dx1, dx2);
+      const bestZDist = Math.min(dz1, dz2);
+
+      if (bestXDist < bestZDist) {
+        if (bestXDist < eps) {
+          best = { other, snapAxis: 'x', dist: bestXDist };
+          break;
+        }
+      } else {
+        if (bestZDist < eps) {
+          best = { other, snapAxis: 'z', dist: bestZDist };
+          break;
+        }
+      }
+    }
+
+    if (!best) return;
+
+    const other = best.other;
+
+    // Align rotation: match full rotation so doors stay consistent.
+    moving.quaternion.copy(other.quaternion);
+
+    // Snap position: move moving door so its nearest side touches other's nearest side.
+    const movingBox2 = new THREE.Box3().setFromObject(moving);
+    const otherBox2 = new THREE.Box3().setFromObject(other);
+
+    const pos = moving.position.clone();
+
+    if (best.snapAxis === 'x') {
+      // Determine which sides are closest (min-to-max vs max-to-min)
+      const distMinToMax = Math.abs(movingBox2.min.x - otherBox2.max.x);
+      const distMaxToMin = Math.abs(movingBox2.max.x - otherBox2.min.x);
+
+      if (distMinToMax <= distMaxToMin) {
+        const targetMinX = otherBox2.max.x;
+        const delta = targetMinX - movingBox2.min.x;
+        pos.x += delta;
+      } else {
+        const targetMaxX = otherBox2.min.x;
+        const delta = targetMaxX - movingBox2.max.x;
+        pos.x += delta;
+      }
+    } else {
+      const distMinToMax = Math.abs(movingBox2.min.z - otherBox2.max.z);
+      const distMaxToMin = Math.abs(movingBox2.max.z - otherBox2.min.z);
+
+      if (distMinToMax <= distMaxToMin) {
+        const targetMinZ = otherBox2.max.z;
+        const delta = targetMinZ - movingBox2.min.z;
+        pos.z += delta;
+      } else {
+        const targetMaxZ = otherBox2.min.z;
+        const delta = targetMaxZ - movingBox2.max.z;
+        pos.z += delta;
+      }
+    }
+
+    moving.position.copy(pos);
+    moving.updateMatrixWorld(true);
   }
 
   private positionMesh(mesh: THREE.Object3D, type: string, position: THREE.Vector3): void {
