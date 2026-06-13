@@ -1,0 +1,134 @@
+:host {
+  display: block;
+  height: 100%;
+  width: 320px;
+  flex-shrink: 0;
+}
+
+.properties-panel {
+  width: 320px;
+  background-color: #1e293b;
+  border-left: 1px solid #334155;
+  padding: 1.5rem;
+  flex-shrink: 0;
+  overflow-y: auto;
+  height: 100%;
+  
+  h3 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+}
+
+.empty-state {
+  color: #64748b;
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 2rem 0;
+  font-style: italic;
+}
+
+/* Properties Styles */
+.property-group {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #334155;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  h4 {
+    margin: 0 0 1rem 0;
+    font-size: 0.85rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+}
+
+.object-info {
+  .obj-name {
+    font-size: 1rem;
+    font-weight: 500;
+    color: #f8fafc;
+    margin-bottom: 0.25rem;
+  }
+  
+  .obj-id {
+    font-size: 0.75rem;
+    color: #64748b;
+    font-family: monospace;
+  }
+}
+
+.transform-row {
+  margin-bottom: 1.25rem;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: #cbd5e1;
+    margin-bottom: 0.5rem;
+  }
+}
+
+.vector-inputs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.vector-input {
+  display: flex;
+  align-items: center;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  overflow: hidden;
+  flex: 1;
+
+  &:focus-within {
+    border-color: #3b82f6;
+  }
+
+  .axis {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #f8fafc;
+    background: #1e293b;
+    border-right: 1px solid #334155;
+    height: 100%;
+    
+    &.x { color: #f87171; }
+    &.y { color: #4ade80; }
+    &.z { color: #60a5fa; }
+  }
+
+  input {
+    flex: 1;
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #f8fafc;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.85rem;
+    outline: none;
+    -moz-appearance: textfield;
+    appearance: textfield;
+    
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+  }
+}

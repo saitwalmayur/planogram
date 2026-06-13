@@ -1,0 +1,69 @@
+<div class="planogram-layout">
+  <header class="workspace-header">
+    <div class="header-left">
+      <a routerLink="/" class="back-link">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        Back to Home
+      </a>
+      <h2 class="document-title">Untitled Planogram</h2>
+    </div>
+    <div class="header-right">
+      <button class="btn-action">Save</button>
+      <button class="btn-action export">Export</button>
+    </div>
+  </header>
+  
+  <div class="workspace-content">
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <h3>Scene Hierarchy</h3>
+        <div class="hierarchy-list">
+          <div *ngFor="let obj of objectDataList" 
+               class="hierarchy-item" 
+               [class.active]="selectedObject?.id === obj.id"
+               (click)="selectObjectById(obj.id)">
+               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            {{ obj.name }}
+          </div>
+          
+          <div class="empty-state sm" *ngIf="objectDataList.length === 0">
+            Scene is empty.
+          </div>
+        </div>
+      </div>
+      
+      <div class="sidebar-section">
+        <h3>Library</h3>
+        <p class="sidebar-help">Select objects to add</p>
+        
+        <div class="draggable-item" draggable="true" (dragstart)="onDragStart($event, 'cube')" (dragend)="onDragEnd($event)">
+          <div class="item-icon cube-icon"></div>
+          <span>Standard Cube</span>
+        </div>
+        <div class="draggable-item" draggable="true" (dragstart)="onDragStart($event, 'shelf')" (dragend)="onDragEnd($event)">
+          <div class="item-icon prism-icon"></div>
+          <span>Rectangle Shelf</span>
+        </div>
+        <div class="draggable-item" draggable="true" (dragstart)="onDragStart($event, 'cupboard')" (dragend)="onDragEnd($event)">
+          <div class="item-icon door-icon"></div>
+          <span>Open Cupboard</span>
+        </div>
+        <div class="draggable-item" draggable="true" (dragstart)="onDragStart($event, 'chest')" (dragend)="onDragEnd($event)">
+          <div class="item-icon chest-icon"></div>
+          <span>Storage Chest</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="canvas-area" (dragover)="onDragOver($event)" (dragleave)="onDragLeave($event)" (drop)="onDrop($event)">
+      <!-- ThreeJS renders inside this container -->
+      <div #canvasContainer class="webgl-container"></div>
+    </main>
+    
+    <app-properties-panel
+      [selectedObject]="selectedObject"
+      [transform]="transform"
+      (transformUpdated)="applyTransformChanges()">
+    </app-properties-panel>
+  </div>
+</div>
