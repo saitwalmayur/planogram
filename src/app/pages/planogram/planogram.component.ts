@@ -32,6 +32,12 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
   private controls!: OrbitControls;
   private transformControl!: TransformControls;
 
+  private viewCubeScene!: THREE.Scene;
+  private viewCubeCamera!: THREE.PerspectiveCamera;
+  private viewCubeRenderer!: THREE.WebGLRenderer;
+  private viewCubeContainer!: HTMLElement;
+  private viewCubeControls!: any;
+
   // Raycasting
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -85,6 +91,12 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     if (this.isBrowser) {
       if (this.animationId !== 0) {
         cancelAnimationFrame(this.animationId);
+      }
+      if (this.viewCubeControls?._dispose) {
+        this.viewCubeControls._dispose();
+      }
+      if (this.viewCubeRenderer) {
+        this.viewCubeRenderer.dispose();
       }
       if (this.renderer) {
         this.renderer.domElement.removeEventListener('click', this.onPointerDown.bind(this));
@@ -251,9 +263,13 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
       if (this.selectedObject) {
          this.updateTransformViewFromModel();
 
-         // Snap doors while dragging, so releasing lands perfectly.
-         if (this.selectedObject.mesh.userData['type'] === 'door') {
+         const type = this.selectedObject.mesh.userData['type'];
+         // Snap objects while dragging, so releasing lands perfectly.
+         if (type === 'door') {
            this.snapDoors();
+           this.updateTransformViewFromModel();
+         } else if (type === 'cupboard') {
+           this.snapCupboardToDoors();
            this.updateTransformViewFromModel();
          }
 
@@ -265,6 +281,43 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     // Initialize state
     this.transformControl.setSpace(this.transformSpace);
     this.updateSnapSettings();
+
+    // View Cube Setup
+    this.viewCubeScene = new THREE.Scene();
+    this.viewCubeCamera = new THREE.PerspectiveCamera(70, 1, 0.1, 1000);
+    this.viewCubeCamera.position.z = 80;
+
+    this.viewCubeContainer = document.createElement('div');
+    this.viewCubeContainer.className = 'view-cube-overlay';
+    this.viewCubeContainer.style.position = 'absolute';
+    this.viewCubeContainer.style.bottom = '20px';
+    this.viewCubeContainer.style.left = '20px';
+    this.viewCubeContainer.style.width = '120px';
+    this.viewCubeContainer.style.height = '120px';
+    this.viewCubeContainer.style.zIndex = '1000';
+    this.canvasContainer.nativeElement.appendChild(this.viewCubeContainer);
+
+    this.viewCubeRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    this.viewCubeRenderer.setPixelRatio(window.devicePixelRatio);
+    this.viewCubeRenderer.setSize(120, 120, false);
+    this.viewCubeRenderer.domElement.style.display = 'block';
+    this.viewCubeRenderer.domElement.style.width = '120px';
+    this.viewCubeRenderer.domElement.style.height = '120px';
+    this.viewCubeContainer.appendChild(this.viewCubeRenderer.domElement);
+
+    this.viewCubeControls = new ViewCubeControls(this.viewCubeCamera, 40, 6, this.viewCubeContainer);
+    this.viewCubeScene.add(this.viewCubeControls.getObject());
+
+    this.viewCubeControls.addEventListener('angle-change', (event: any) => {
+      if (this.controls) {
+        const distance = this.camera.position.distanceTo(this.controls.target);
+        const offset = new THREE.Vector3(0, 0, distance);
+        offset.applyQuaternion(event.quaternion);
+        this.camera.position.copy(this.controls.target).add(offset);
+        this.camera.lookAt(this.controls.target);
+        this.controls.update();
+      }
+    });
   }
 
   private onPointerDown(event: PointerEvent): void {
@@ -429,6 +482,24 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     this.cdr.detectChanges();
   }
 
+  public setShelfAlignment(alignment: 'left' | 'right' | 'justify'): void {
+    if (this.selectedObject) {
+      const type = this.selectedObject.mesh.userData['type'];
+      let shelf: THREE.Object3D | null = null;
+      
+      if (type === 'shelf') {
+        shelf = this.selectedObject.mesh;
+      } else if (type === 'bottle') {
+        shelf = this.selectedObject.mesh.parent;
+      }
+      
+      if (shelf && shelf.userData['type'] === 'shelf') {
+        shelf.userData['alignment'] = alignment;
+        this.cdr.detectChanges();
+      }
+    }
+  }
+
   public toggleSnap(): void {
     this.snapEnabled = !this.snapEnabled;
     this.updateSnapSettings();
@@ -527,46 +598,84 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
     
     this.updateParametricMeshes();
 
+    if (this.viewCubeControls) {
+      if (!this.viewCubeControls['_animation']) {
+        this.viewCubeControls.setQuaternion(this.camera.quaternion);
+      }
+      this.viewCubeControls.update();
+    }
+
     if (this.renderer && this.scene && this.camera) {
+      this.renderer.autoClear = false;
+      this.renderer.clear();
       this.renderer.render(this.scene, this.camera);
+
+      if (this.viewCubeScene && this.viewCubeCamera && this.viewCubeRenderer) {
+        this.viewCubeRenderer.render(this.viewCubeScene, this.viewCubeCamera);
+      }
     }
   };
 
   private updateParametricMeshes(): void {
     for (const obj of this.interactableObjects) {
-       if (obj.userData['type'] === 'cupboard') {
-          const sx = obj.scale.x || 1;
-          const sy = obj.scale.y || 1;
-          const sz = obj.scale.z || 1;
-          
-          if (obj.children.length < 5) continue;
-          
-          const left = obj.children[0] as THREE.Mesh;
-          left.scale.set(1/sx, 1, 1);
-          left.position.set(-0.5 + 0.01/sx, 1, 0);
-          
-          const right = obj.children[1] as THREE.Mesh;
-          right.scale.set(1/sx, 1, 1);
-          right.position.set(0.5 - 0.01/sx, 1, 0);
-          
-          const top = obj.children[2] as THREE.Mesh;
-          top.scale.set(1, 1/sy, 1);
-          top.position.set(0, 2 - 0.01/sy, 0);
-          
-          const bottom = obj.children[3] as THREE.Mesh;
-          bottom.scale.set(1, 1/sy, 1);
-          bottom.position.set(0, 0.01/sy, 0);
-          
-          const back = obj.children[4] as THREE.Mesh;
-          back.scale.set(1, 1, 1/sz);
-          back.position.set(0, 1, -0.5 + 0.01/sz);
+       const type = obj.userData['type'];
+       const sx = obj.scale.x || 1;
+       const sy = obj.scale.y || 1;
+       const sz = obj.scale.z || 1;
 
-          for (let i = 5; i < obj.children.length; i++) {
-             const child = obj.children[i] as THREE.Mesh;
+       if (type === 'cupboard') {
+          if (obj.children.length >= 5) {
+             (obj.children[0] as THREE.Mesh).scale.set(1 / sx, 1, 1);
+             (obj.children[0] as THREE.Mesh).position.set(-0.5 + 0.01 / sx, 1, 0);
+             (obj.children[1] as THREE.Mesh).scale.set(1 / sx, 1, 1);
+             (obj.children[1] as THREE.Mesh).position.set(0.5 - 0.01 / sx, 1, 0);
+             (obj.children[2] as THREE.Mesh).scale.set(1, 1 / sy, 1);
+             (obj.children[2] as THREE.Mesh).position.set(0, 2 - 0.01 / sy, 0);
+             (obj.children[3] as THREE.Mesh).scale.set(1, 1 / sy, 1);
+             (obj.children[3] as THREE.Mesh).position.set(0, 0.01 / sy, 0);
+             (obj.children[4] as THREE.Mesh).scale.set(1, 1, 1 / sz);
+             (obj.children[4] as THREE.Mesh).position.set(0, 1, -0.25 + 0.005 / sz);
+          }
+          for (const child of obj.children) {
              if (child.userData['type'] === 'shelf') {
-                child.scale.set((sx - 0.04)/sx, 1/sy, (sz - 0.02)/sz);
-                child.position.x = 0;
-                child.position.z = 0.01/sz;
+                child.scale.set((sx - 0.04) / sx, 1 / sy, (0.5 * sz - 0.01) / sz);
+                child.position.set(0, child.position.y, 0.005 / sz);
+             }
+          }
+       } else if (type === 'door') {
+          for (const child of obj.children) {
+             if (child.userData['type'] === 'shelf') {
+                // Adjust shelf on door: Width = 80% of door width, Depth = 0.15m
+                child.scale.set(0.72, 1 / sy, 0.15 / sz);
+                child.position.set(0, child.position.y, 0.025 + 0.075 / sz);
+             }
+          }
+       } else if (type === 'shelf') {
+          const alignment = obj.userData['alignment'] || 'justify';
+          const bottles = obj.children.filter(c => c.userData['type'] === 'bottle');
+          
+          if (bottles.length > 0) {
+             const n = bottles.length;
+             for (let i = 0; i < n; i++) {
+                const item = bottles[i];
+                // Counter-scale so bottles don't stretch with the shelf
+                item.scale.set(1 / sx, 1 / sy, 1 / sz);
+                
+                item.position.y = 0.01 / sy; // Sit on top of the shelf surface
+                item.position.z = 0;         // Center of shelf depth
+                
+                const worldSpacing = 0.12;
+                const localSpacing = worldSpacing / sx;
+
+                if (alignment === 'left') {
+                   item.position.x = -0.5 + (0.06 / sx) + (i * localSpacing);
+                } else if (alignment === 'right') {
+                   item.position.x = 0.5 - (0.06 / sx) - ((n - 1 - i) * localSpacing);
+                } else {
+                   // Justify distribution
+                   const spacing = 1.0 / (n + 1);
+                   item.position.x = -0.5 + (spacing * (i + 1));
+                }
              }
           }
        }
@@ -576,7 +685,7 @@ export class PlanogramComponent implements AfterViewInit, OnDestroy {
 private draggingType: string | null = null;
   private phantomMesh: THREE.Object3D | null = null;
   private canDrop: boolean = true;
-  private hoverCupboard: THREE.Object3D | null = null;
+  private hoverTarget: THREE.Object3D | null = null;
 
   // Drag and Drop Logic
   public onDragStart(event: DragEvent, type: string): void {
@@ -594,7 +703,7 @@ private draggingType: string | null = null;
 
   public onDragEnd(event: DragEvent): void {
     this.draggingType = null;
-    this.hoverCupboard = null;
+    this.hoverTarget = null;
     this.removePhantom();
   }
 
@@ -608,24 +717,24 @@ private draggingType: string | null = null;
 
     const intersect = this.getRaycastIntersection(event);
     if (intersect) {
-      // Check if hovering over a cupboard
-      const cupboardHit = this.getCupboardIntersection(event);
+      // Check if hovering over a cupboard or door
+      const targetHit = this.getPlacementTargetIntersection(event);
       
       if (!this.phantomMesh) {
          this.phantomMesh = this.createObject3DOnly(this.draggingType);
          this.scene.add(this.phantomMesh);
       }
 
-if (cupboardHit && this.draggingType === 'shelf') {
-         this.positionMeshInsideCupboard(this.phantomMesh, cupboardHit, event);
-         this.hoverCupboard = cupboardHit;
+      if (targetHit && (this.draggingType === 'shelf' || this.draggingType === 'bottle')) {
+         this.positionMeshOnTarget(this.phantomMesh, targetHit, event);
+         this.hoverTarget = targetHit;
       } else {
         this.positionMesh(this.phantomMesh, this.draggingType, intersect);
-        this.hoverCupboard = null;
+        this.hoverTarget = null;
       }
       
       // Collision checking
-      this.canDrop = !this.checkCollision(this.phantomMesh, this.hoverCupboard);
+      this.canDrop = !this.checkCollision(this.phantomMesh, this.hoverTarget);
 
       this.phantomMesh.traverse((child) => {
         if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
@@ -642,7 +751,7 @@ if (cupboardHit && this.draggingType === 'shelf') {
 
   public onDragLeave(event: DragEvent): void {
     this.canDrop = true;
-    this.hoverCupboard = null;
+    this.hoverTarget = null;
     this.removePhantom();
   }
 
@@ -654,16 +763,16 @@ if (cupboardHit && this.draggingType === 'shelf') {
       // We will create a fresh object instead of keeping the phantom to reset properly
       const mesh = this.createObject3DOnly(type);
 
-      if (this.hoverCupboard && type === 'shelf') {
-        // Make placement deterministic in cupboard LOCAL space.
-        this.positionMeshInsideCupboard(mesh, this.hoverCupboard, event);
+      if (this.hoverTarget && (type === 'shelf' || type === 'bottle')) {
+        // Make placement deterministic in target LOCAL space.
+        this.positionMeshOnTarget(mesh, this.hoverTarget, event);
 
         mesh.userData['rootId'] = mesh.uuid;
 
         const worldPos = mesh.position.clone();
-        this.hoverCupboard.add(mesh);
-        this.hoverCupboard.updateMatrixWorld(true);
-        this.hoverCupboard.worldToLocal(worldPos);
+        this.hoverTarget.add(mesh);
+        this.hoverTarget.updateMatrixWorld(true);
+        this.hoverTarget.worldToLocal(worldPos);
         mesh.position.copy(worldPos);
         
         // Reset scale so parametric update handles it natively
@@ -686,13 +795,14 @@ if (cupboardHit && this.draggingType === 'shelf') {
       else if (type === 'cupboard') name = 'Open Cupboard';
       else if (type === 'chest') name = 'Storage Chest';
       else if (type === 'door') name = 'Door';
+      else if (type === 'bottle') name = 'Bottle';
 
       // Add to interactableObjects so nested shelves can be selected/transformed.
       this.interactableObjects.push(mesh);
 
       const objData: SceneObjectData = { id: mesh.uuid, name: name, mesh: mesh, children: [] };
-      if (this.hoverCupboard && type === 'shelf') {
-         const parentData = this.findObjectData(this.hoverCupboard.userData['rootId'] || this.hoverCupboard.uuid);
+      if (this.hoverTarget && (type === 'shelf' || type === 'bottle')) {
+         const parentData = this.findObjectData(this.hoverTarget.userData['rootId'] || this.hoverTarget.uuid);
          if (parentData) {
             parentData.children = parentData.children || [];
             parentData.children.push(objData);
@@ -706,7 +816,7 @@ if (cupboardHit && this.draggingType === 'shelf') {
     }
 
     this.draggingType = null;
-    this.hoverCupboard = null;
+    this.hoverTarget = null;
     this.removePhantom();
   }
 
@@ -778,21 +888,22 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
       return false;
   }
 
-  private getCupboardIntersection(event: DragEvent | PointerEvent): THREE.Object3D | null {
+  private getPlacementTargetIntersection(event: DragEvent | PointerEvent): THREE.Object3D | null {
      const bounds = this.renderer.domElement.getBoundingClientRect();
      this.mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
      this.mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
      this.raycaster.setFromCamera(this.mouse, this.camera);
 
-     // Get all cupboards from interactable objects
-     const cupboards = this.interactableObjects.filter(obj => obj.userData['type'] === 'cupboard');
+     const targets = this.interactableObjects.filter(obj => 
+        obj.userData['type'] === 'cupboard' || obj.userData['type'] === 'door'
+     );
      
-     if (cupboards.length === 0) return null;
+     if (targets.length === 0) return null;
 
-     const intersects = this.raycaster.intersectObjects(cupboards, true);
+     const intersects = this.raycaster.intersectObjects(targets, true);
      if (intersects.length > 0) {
         let obj: THREE.Object3D | null = intersects[0].object;
-        while (obj && obj.userData['type'] !== 'cupboard') {
+        while (obj && obj.userData['type'] !== 'cupboard' && obj.userData['type'] !== 'door') {
             obj = obj.parent;
         }
         return obj;
@@ -800,37 +911,46 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
      return null;
   }
 
-  private positionMeshInsideCupboard(mesh: THREE.Object3D, cupboard: THREE.Object3D, event: DragEvent | PointerEvent): void {
+  private positionMeshOnTarget(mesh: THREE.Object3D, target: THREE.Object3D, event: DragEvent | PointerEvent): void {
     const bounds = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
     this.mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
     this.raycaster.setFromCamera(this.mouse, this.camera);
 
-    const intersects = this.raycaster.intersectObjects([cupboard], true);
-    let hitY = cupboard.position.y + 1; // Default to middle
+    const intersects = this.raycaster.intersectObjects([target], true);
+    let hitY = target.position.y + 1; // Default to middle
     if (intersects.length > 0) {
        hitY = intersects[0].point.y;
     }
 
-    // Compute desired position in WORLD space first.
-    let sx = 1, sy = 1, sz = 1;
-    if (cupboard.scale) {
-       sx = cupboard.scale.x;
-       sy = cupboard.scale.y;
-       sz = cupboard.scale.z;
-    }
+    const targetType = target.userData['type'];
+    const sx = target.scale.x;
+    const sy = target.scale.y;
+    const sz = target.scale.z;
 
+    let localZ = 0;
     if (mesh.userData['type'] === 'shelf') {
-       mesh.scale.set(sx - 0.04, 1, sz - 0.02);
+       if (targetType === 'door') {
+          mesh.scale.set(0.72 * sx, 1, 0.15);
+          localZ = 0.025 + 0.075 / sz;
+       } else {
+          mesh.scale.set(sx - 0.04, 1, 0.5 * sz - 0.01);
+          localZ = 0.005 / sz;
+       }
+    } else if (mesh.userData['type'] === 'bottle') {
+       // Bottles use fixed size, placement logic in updateParametricMeshes
+       const localPos = new THREE.Vector3(0, 0.01, 0);
+       localPos.applyMatrix4(target.matrixWorld);
+       mesh.position.copy(localPos);
+       return; 
     }
 
-    const localZ = 0.01 / sz;
     const localPos = new THREE.Vector3(0, 0, localZ);
-    localPos.applyMatrix4(cupboard.matrixWorld);
+    localPos.applyMatrix4(target.matrixWorld);
 
     mesh.position.set(
       localPos.x, // Centered horizontally in cupboard
-      Math.max(cupboard.position.y + 0.01, Math.min(cupboard.position.y + (2 * sy) - 0.01, hitY)),
+      Math.max(target.position.y + 0.01, Math.min(target.position.y + (2 * sy) - 0.01, hitY)),
       localPos.z // Snapped to back
     );
   }
@@ -862,20 +982,20 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
        
        const material = new THREE.MeshStandardMaterial({ color: '#a8a8a8', roughness: 0.3, metalness: 0.1 });
        
-       const left = new THREE.Mesh(new THREE.BoxGeometry(0.02, 2, 1), material);
+       const left = new THREE.Mesh(new THREE.BoxGeometry(0.02, 2, 0.5), material);
        left.position.set(-0.49, 1, 0); 
        
-       const right = new THREE.Mesh(new THREE.BoxGeometry(0.02, 2, 1), material);
+       const right = new THREE.Mesh(new THREE.BoxGeometry(0.02, 2, 0.5), material);
        right.position.set(0.49, 1, 0);
        
-       const top = new THREE.Mesh(new THREE.BoxGeometry(1, 0.02, 1), material);
+       const top = new THREE.Mesh(new THREE.BoxGeometry(1, 0.02, 0.5), material);
        top.position.set(0, 1.99, 0);
        
-       const bottom = new THREE.Mesh(new THREE.BoxGeometry(1, 0.02, 1), material);
+       const bottom = new THREE.Mesh(new THREE.BoxGeometry(1, 0.02, 0.5), material);
        bottom.position.set(0, 0.01, 0);
        
        const back = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 0.01), material);
-       back.position.set(0, 1, -0.495);
+       back.position.set(0, 1, -0.245);
        
        group.add(left, right, top, bottom, back);
        // Ensure all cupboard parts cast/receive shadows.
@@ -883,6 +1003,21 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
        applyShadowFlags(group);
        return group;
      }
+
+    if (type === 'bottle') {
+      const group = new THREE.Group();
+      group.userData['type'] = 'bottle';
+      const mat = new THREE.MeshStandardMaterial({ color: '#34d399', roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.9 });
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.15), mat);
+      body.position.y = 0.075;
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.05), mat);
+      neck.position.y = 0.175;
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.01), new THREE.MeshStandardMaterial({ color: '#ffffff' }));
+      cap.position.y = 0.2;
+      group.add(body, neck, cap);
+      applyShadowFlags(group);
+      return group;
+    }
 
      let geometry: THREE.BufferGeometry;
      let materialColor = '#38bdf8';
@@ -1006,6 +1141,88 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
     moving.updateMatrixWorld(true);
   }
 
+  private snapCupboardToDoors(): void {
+    // Snap cupboard corners to door corners if they are close and oriented similarly.
+    const doors = this.interactableObjects.filter(o => o.userData['type'] === 'door');
+    if (doors.length === 0) return;
+
+    const moving = this.selectedObject?.mesh;
+    if (!moving || moving.userData['type'] !== 'cupboard') return;
+
+    moving.updateMatrixWorld(true);
+    const movingBox = new THREE.Box3().setFromObject(moving);
+    const eps = 0.3; // Distance threshold for snapping
+
+    const movingWorldNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(moving.quaternion).normalize();
+
+    let bestDoor: THREE.Object3D | null = null;
+    let bestDist = Infinity;
+    let bestDoorCorner: THREE.Vector3 | null = null;
+
+    for (const door of doors) {
+      door.updateMatrixWorld(true);
+      const doorBox = new THREE.Box3().setFromObject(door);
+
+      // Check if they have similar facing orientation
+      const doorNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(door.quaternion).normalize();
+      if (Math.abs(movingWorldNormal.dot(doorNormal)) < 0.9) continue;
+
+      // Define corners in 2D (XZ plane)
+      const mCorners = [
+        new THREE.Vector3(movingBox.min.x, 0, movingBox.min.z),
+        new THREE.Vector3(movingBox.min.x, 0, movingBox.max.z),
+        new THREE.Vector3(movingBox.max.x, 0, movingBox.min.z),
+        new THREE.Vector3(movingBox.max.x, 0, movingBox.max.z)
+      ];
+      const dCorners = [
+        new THREE.Vector3(doorBox.min.x, 0, doorBox.min.z),
+        new THREE.Vector3(doorBox.min.x, 0, doorBox.max.z),
+        new THREE.Vector3(doorBox.max.x, 0, doorBox.min.z),
+        new THREE.Vector3(doorBox.max.x, 0, doorBox.max.z)
+      ];
+
+      for (const mc of mCorners) {
+        for (const dc of dCorners) {
+          const d = mc.distanceTo(dc);
+          if (d < eps && d < bestDist) {
+            bestDist = d;
+            bestDoor = door;
+            bestDoorCorner = dc;
+          }
+        }
+      }
+    }
+
+    if (bestDoor && bestDoorCorner) {
+      // Align rotation to match door
+      moving.quaternion.copy(bestDoor.quaternion);
+      moving.updateMatrixWorld(true);
+
+      // Align the closest cupboard corner to the targeted door corner after rotation match
+      const movingBox2 = new THREE.Box3().setFromObject(moving);
+      const mCorners2 = [
+        new THREE.Vector3(movingBox2.min.x, 0, movingBox2.min.z),
+        new THREE.Vector3(movingBox2.min.x, 0, movingBox2.max.z),
+        new THREE.Vector3(movingBox2.max.x, 0, movingBox2.min.z),
+        new THREE.Vector3(movingBox2.max.x, 0, movingBox2.max.z)
+      ];
+
+      let closestMC = mCorners2[0];
+      let minD = mCorners2[0].distanceTo(bestDoorCorner);
+      for (let i = 1; i < mCorners2.length; i++) {
+        const d = mCorners2[i].distanceTo(bestDoorCorner);
+        if (d < minD) {
+          minD = d;
+          closestMC = mCorners2[i];
+        }
+      }
+
+      moving.position.x += (bestDoorCorner.x - closestMC.x);
+      moving.position.z += (bestDoorCorner.z - closestMC.z);
+      moving.updateMatrixWorld(true);
+    }
+  }
+
   private positionMesh(mesh: THREE.Object3D, type: string, position: THREE.Vector3): void {
      if (type === 'cupboard') {
         mesh.position.set(position.x, 0, position.z); // Because cupboard meshes are already translated up by 1 and half
@@ -1018,3 +1235,260 @@ private checkCollision(meshToTest: THREE.Object3D, ignoreParent: THREE.Object3D 
      }
   }
 }
+
+const MAINCOLOR = 0xDDDDDD;
+const ACCENTCOLOR = 0XF2F5CE;
+const OUTLINECOLOR = 0xCCCCCC;
+const toRad = Math.PI / 180;
+const TWOPI = 2 * Math.PI;
+
+const FACES = {
+  TOP: 1, FRONT: 2, RIGHT: 3, BACK: 4, LEFT: 5, BOTTOM: 6,
+  TOP_FRONT_EDGE: 7, TOP_RIGHT_EDGE: 8, TOP_BACK_EDGE: 9, TOP_LEFT_EDGE: 10,
+  FRONT_RIGHT_EDGE: 11, BACK_RIGHT_EDGE: 12, BACK_LEFT_EDGE: 13, FRONT_LEFT_EDGE: 14,
+  BOTTOM_FRONT_EDGE: 15, BOTTOM_RIGHT_EDGE: 16, BOTTOM_BACK_EDGE: 17, BOTTOM_LEFT_EDGE: 18,
+  TOP_FRONT_RIGHT_CORNER: 19, TOP_BACK_RIGHT_CORNER: 20, TOP_BACK_LEFT_CORNER: 21, TOP_FRONT_LEFT_CORNER: 22,
+  BOTTOM_FRONT_RIGHT_CORNER: 23, BOTTOM_BACK_RIGHT_CORNER: 24, BOTTOM_BACK_LEFT_CORNER: 25, BOTTOM_FRONT_LEFT_CORNER: 26
+};
+
+class ViewCubeControls extends THREE.EventDispatcher<any> {
+  cubeSize: number; edgeSize: number; domElement: HTMLElement; _cube: ViewCube; _camera: THREE.Camera; _animation: any;
+  constructor(camera: THREE.Camera, cubeSize = 30, edgeSize = 5, domElement: HTMLElement) {
+    super();
+    this.cubeSize = cubeSize; this.edgeSize = edgeSize; this.domElement = domElement;
+    this._cube = new ViewCube({ size: this.cubeSize, edge: this.edgeSize, outline: true, bgColor: MAINCOLOR, hoverColor: ACCENTCOLOR, outlineColor: OUTLINECOLOR });
+    this._camera = camera; this._animation = null;
+    this._handleMouseMove = this._handleMouseMove.bind(this);
+    this._handleMouseClick = this._handleMouseClick.bind(this);
+    this._listen();
+  }
+  _listen() {
+    this.domElement.addEventListener('mousemove', this._handleMouseMove);
+    this.domElement.addEventListener('click', this._handleMouseClick);
+  }
+  _handleMouseClick(event: MouseEvent) {
+    const x = (event.offsetX / (event.target as HTMLElement).clientWidth) * 2 - 1;
+    const y = -(event.offsetY / (event.target as HTMLElement).clientHeight) * 2 + 1;
+    this._checkSideTouch(x, y);
+  }
+  _checkSideTouch(x: number, y: number) {
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(x, y), this._camera);
+    const intersects = raycaster.intersectObjects(this._cube.children, true);
+    if (intersects.length) {
+      for (let { object } of intersects) {
+        if (object.name) { this._rotateTheCube(Number(object.name)); break; }
+      }
+    }
+  }
+  _rotateTheCube(side: number) {
+    switch (side) {
+      case FACES.FRONT: this._setCubeAngles(0, 0, 0); break;
+      case FACES.RIGHT: this._setCubeAngles(0, -90, 0); break;
+      case FACES.BACK: this._setCubeAngles(0, -180, 0); break;
+      case FACES.LEFT: this._setCubeAngles(0, -270, 0); break;
+      case FACES.TOP: this._setCubeAngles(90, 0, 0); break;
+      case FACES.BOTTOM: this._setCubeAngles(-90, 0, 0); break;
+      case FACES.TOP_FRONT_EDGE: this._setCubeAngles(45, 0, 0); break;
+      case FACES.TOP_RIGHT_EDGE: this._setCubeAngles(45, -90, 0); break;
+      case FACES.TOP_BACK_EDGE: this._setCubeAngles(45, -180, 0); break;
+      case FACES.TOP_LEFT_EDGE: this._setCubeAngles(45, -270, 0); break;
+      case FACES.BOTTOM_FRONT_EDGE: this._setCubeAngles(-45, 0, 0); break;
+      case FACES.BOTTOM_RIGHT_EDGE: this._setCubeAngles(-45, -90, 0); break;
+      case FACES.BOTTOM_BACK_EDGE: this._setCubeAngles(-45, -180, 0); break;
+      case FACES.BOTTOM_LEFT_EDGE: this._setCubeAngles(-45, -270, 0); break;
+      case FACES.FRONT_RIGHT_EDGE: this._setCubeAngles(0, -45, 0); break;
+      case FACES.BACK_RIGHT_EDGE: this._setCubeAngles(0, -135, 0); break;
+      case FACES.BACK_LEFT_EDGE: this._setCubeAngles(0, -225, 0); break;
+      case FACES.FRONT_LEFT_EDGE: this._setCubeAngles(0, -315, 0); break;
+      case FACES.TOP_FRONT_RIGHT_CORNER: this._setCubeAngles(45, -45, 0); break;
+      case FACES.TOP_BACK_RIGHT_CORNER: this._setCubeAngles(45, -135, 0); break;
+      case FACES.TOP_BACK_LEFT_CORNER: this._setCubeAngles(45, -225, 0); break;
+      case FACES.TOP_FRONT_LEFT_CORNER: this._setCubeAngles(45, -315, 0); break;
+      case FACES.BOTTOM_FRONT_RIGHT_CORNER: this._setCubeAngles(-45, -45, 0); break;
+      case FACES.BOTTOM_BACK_RIGHT_CORNER: this._setCubeAngles(-45, -135, 0); break;
+      case FACES.BOTTOM_BACK_LEFT_CORNER: this._setCubeAngles(-45, -225, 0); break;
+      case FACES.BOTTOM_FRONT_LEFT_CORNER: this._setCubeAngles(-45, -315, 0); break;
+    }
+  }
+  _setCubeAngles(x: number, y: number, z: number) {
+    const base = this._cube.rotation;
+    this._animation = {
+      base: { x: base.x, y: base.y, z: base.z },
+      delta: { x: calculateAngleDelta(base.x, x * toRad), y: calculateAngleDelta(base.y, y * toRad), z: calculateAngleDelta(base.z, z * toRad) },
+      duration: 500, time: Date.now()
+    };
+  }
+  _handleMouseMove(event: MouseEvent) {
+    const x = (event.offsetX / (event.target as HTMLElement).clientWidth) * 2 - 1;
+    const y = -(event.offsetY / (event.target as HTMLElement).clientHeight) * 2 + 1;
+    this._checkSideOver(x, y);
+  }
+  _checkSideOver(x: number, y: number) {
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(x, y), this._camera);
+    const intersects = raycaster.intersectObjects(this._cube.children, true);
+    this._cube.traverse((obj: any) => { if (obj.name) obj.material.color.setHex(MAINCOLOR); });
+    if (intersects.length) {
+      for (let { object } of intersects) {
+        if (object.name) {
+          object.parent?.children.forEach((child: any) => {
+            if (child.name === object.name) child.material.color.setHex(ACCENTCOLOR);
+          });
+          break;
+        }
+      }
+    }
+  }
+  update() { this._animate(); }
+  _animate() {
+    if (!this._animation) return;
+    const now = Date.now(); const { duration, time } = this._animation;
+    const alpha = Math.min(((now - time) / duration), 1);
+    this._animateCubeRotation(this._animation, alpha);
+    if (alpha == 1) this._animation = null;
+    this.dispatchEvent({ type: 'angle-change', quaternion: this._cube.quaternion.clone() } as any);
+  }
+  _animateCubeRotation({ base, delta }: any, alpha: number) {
+    const ease = (Math.sin(((alpha * 2) - 1) * Math.PI * 0.5) + 1) * 0.5;
+    let angleX = -TWOPI + base.x + delta.x * ease;
+    let angleY = -TWOPI + base.y + delta.y * ease;
+    let angleZ = -TWOPI + base.z + delta.z * ease;
+    this._cube.rotation.set(angleX % TWOPI, angleY % TWOPI, angleZ % TWOPI);
+  }
+  setQuaternion(quaternion: THREE.Quaternion) { this._cube.setRotationFromQuaternion(quaternion); }
+  getObject() { return this._cube; }
+  _dispose() {
+    this.domElement.removeEventListener('mousemove', this._handleMouseMove);
+    this.domElement.removeEventListener('click', this._handleMouseClick);
+  }
+}
+
+class ViewCube extends THREE.Object3D {
+  _cubeSize: number; _edgeSize: number; _outline: boolean; _bgColor: number; _hoverColor: number; _outlineColor: number;
+  constructor({ size = 60, edge = 5, outline = true, bgColor = 0xCCCCCC, hoverColor = 0xFFFFFF, outlineColor = 0x999999 }) {
+    super();
+    this._cubeSize = size; this._edgeSize = edge; this._outline = outline; this._bgColor = bgColor; this._hoverColor = hoverColor; this._outlineColor = outlineColor;
+    this._build();
+  }
+  _build() {
+    const faceSize = this._cubeSize - this._edgeSize * 2;
+    const faceOffset = this._cubeSize / 2;
+    const borderSize = this._edgeSize;
+    const cubeFaces = this._createCubeFaces(faceSize, faceOffset);
+    for (let [i, props] of BOX_FACES.entries()) {
+      (cubeFaces.children[i] as THREE.Mesh).name = String(props.name);
+      ((cubeFaces.children[i] as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setHex(this._bgColor);
+      ((cubeFaces.children[i] as THREE.Mesh).material as THREE.MeshBasicMaterial).map = props.map;
+    }
+    this.add(cubeFaces);
+    const corners: THREE.Object3D[] = [];
+    for (let [i, props] of CORNER_FACES.entries()) {
+      const corner = this._createCornerFaces(borderSize, faceOffset, String(props.name), { color: this._bgColor });
+      corner.rotateOnAxis(new THREE.Vector3(0, 1, 0), (i % 4) * 90 * toRad);
+      corners.push(corner);
+    }
+    this.add(new THREE.Group().add(...corners.slice(0, 4)));
+    this.add(new THREE.Group().add(...corners.slice(4)).rotateOnAxis(new THREE.Vector3(1, 0, 0), 180 * toRad));
+    const edges: THREE.Object3D[] = [];
+    for (let [i, props] of EDGE_FACES.entries()) {
+      const edge = this._createHorzEdgeFaces(faceSize, borderSize, faceOffset, String(props.name), { color: this._bgColor });
+      edge.rotateOnAxis(new THREE.Vector3(0, 1, 0), (i % 4) * 90 * toRad);
+      edges.push(edge);
+    }
+    this.add(new THREE.Group().add(...edges.slice(0, 4)));
+    this.add(new THREE.Group().add(...edges.slice(4)).rotateOnAxis(new THREE.Vector3(1, 0, 0), 180 * toRad));
+    const sideEdges = new THREE.Group();
+    for (let [i, props] of EDGE_FACES_SIDE.entries()) {
+      const edge = this._createVertEdgeFaces(borderSize, faceSize, faceOffset, String(props.name), { color: this._bgColor });
+      edge.rotateOnAxis(new THREE.Vector3(0, 1, 0), i * 90 * toRad);
+      sideEdges.add(edge);
+    }
+    this.add(sideEdges);
+    if (this._outline) this.add(this._createCubeOutline(this._cubeSize));
+  }
+  _createFace(size: any, position: any, { axis = [0, 1, 0], angle = 0, name = "", matProps = {} } = {}) {
+    if (!Array.isArray(size)) size = [size, size];
+    const material = new THREE.MeshBasicMaterial(matProps);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(size[0], size[1]), material);
+    face.name = name; face.rotateOnAxis(new THREE.Vector3(axis[0], axis[1], axis[2]), angle * toRad);
+    face.position.set(position[0], position[1], position[2]);
+    return face;
+  }
+  _createCubeFaces(faceSize: number, offset: number) {
+    const faces = new THREE.Object3D();
+    faces.add(this._createFace(faceSize, [0, 0, offset], { axis: [0, 1, 0], angle: 0 }));
+    faces.add(this._createFace(faceSize, [offset, 0, 0], { axis: [0, 1, 0], angle: 90 }));
+    faces.add(this._createFace(faceSize, [0, 0, -offset], { axis: [0, 1, 0], angle: 180 }));
+    faces.add(this._createFace(faceSize, [-offset, 0, 0], { axis: [0, 1, 0], angle: 270 }));
+    faces.add(this._createFace(faceSize, [0, offset, 0], { axis: [1, 0, 0], angle: -90 }));
+    faces.add(this._createFace(faceSize, [0, -offset, 0], { axis: [1, 0, 0], angle: 90 }));
+    return faces;
+  }
+  _createCornerFaces(faceSize: number, offset: number, name = "", matProps = {}) {
+    const corner = new THREE.Object3D(); const borderOffset = offset - faceSize / 2;
+    corner.add(this._createFace(faceSize, [borderOffset, borderOffset, offset], { axis: [0, 1, 0], angle: 0, matProps, name }));
+    corner.add(this._createFace(faceSize, [offset, borderOffset, borderOffset], { axis: [0, 1, 0], angle: 90, matProps, name }));
+    corner.add(this._createFace(faceSize, [borderOffset, offset, borderOffset], { axis: [1, 0, 0], angle: -90, matProps, name }));
+    return corner;
+  }
+  _createHorzEdgeFaces(w: number, h: number, offset: number, name = "", matProps = {}) {
+    const edge = new THREE.Object3D(); const borderOffset = offset - h / 2;
+    edge.add(this._createFace([w, h], [0, borderOffset, offset], { axis: [0, 1, 0], angle: 0, name, matProps }));
+    edge.add(this._createFace([w, h], [0, offset, borderOffset], { axis: [1, 0, 0], angle: -90, name, matProps }));
+    return edge;
+  }
+  _createVertEdgeFaces(w: number, h: number, offset: number, name = "", matProps = {}) {
+    const edge = new THREE.Object3D(); const borderOffset = offset - w / 2;
+    edge.add(this._createFace([w, h], [borderOffset, 0, offset], { axis: [0, 1, 0], angle: 0, name, matProps }));
+    edge.add(this._createFace([w, h], [offset, 0, borderOffset], { axis: [0, 1, 0], angle: 90, name, matProps }));
+    return edge;
+  }
+  _createCubeOutline(size: number) {
+    const wireframe = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, size)), new THREE.LineBasicMaterial({ color: this._outlineColor }));
+    return wireframe;
+  }
+}
+
+function calculateAngleDelta(from: number, to: number) {
+  const direct = to - from; const altA = direct - TWOPI; const altB = direct + TWOPI;
+  return Math.abs(direct) > Math.abs(altA) ? altA : (Math.abs(direct) > Math.abs(altB) ? altB : direct);
+}
+
+function createTextSprite(text: string, props: any): THREE.Texture | null {
+  if (typeof document === 'undefined') return null;
+
+  const fontface = props.font || 'Helvetica'; const fontsize = props.fontSize || 30;
+  const width = props.width || 200; const height = props.height || 200;
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+  const context = canvas.getContext('2d')!;
+  context.fillStyle = "rgba(255, 255, 255, 1.0)"; context.fillRect(0, 0, width, height);
+  context.font = `bold ${fontsize}px ${fontface}`;
+  context.fillStyle = "rgba(0, 0, 0, 1.0)";
+  const metrics = context.measureText(text); const textWidth = metrics.width;
+  context.fillText(text, width / 2 - textWidth / 2, height / 2 + fontsize / 2 - 2);
+  const texture = new THREE.Texture(canvas); texture.minFilter = THREE.LinearFilter; texture.needsUpdate = true;
+  return texture;
+}
+
+const BOX_FACES = [
+  { name: FACES.FRONT, map: createTextSprite("FRONT", { fontSize: 60, font: "Arial Narrow, sans-serif" }) },
+  { name: FACES.RIGHT, map: createTextSprite("RIGHT", { fontSize: 60, font: "Arial Narrow, sans-serif" }) },
+  { name: FACES.BACK, map: createTextSprite("BACK", { fontSize: 60, font: "Arial Narrow, sans-serif" }) },
+  { name: FACES.LEFT, map: createTextSprite("LEFT", { fontSize: 60, font: "Arial Narrow, sans-serif" }) },
+  { name: FACES.TOP, map: createTextSprite("TOP", { fontSize: 60, font: "Arial Narrow, sans-serif" }) },
+  { name: FACES.BOTTOM, map: createTextSprite("BOTTOM", { fontSize: 60, font: "Arial Narrow, sans-serif" }) }
+];
+const CORNER_FACES = [
+  { name: FACES.TOP_FRONT_RIGHT_CORNER }, { name: FACES.TOP_BACK_RIGHT_CORNER }, { name: FACES.TOP_BACK_LEFT_CORNER }, { name: FACES.TOP_FRONT_LEFT_CORNER },
+  { name: FACES.BOTTOM_BACK_RIGHT_CORNER }, { name: FACES.BOTTOM_FRONT_RIGHT_CORNER }, { name: FACES.BOTTOM_FRONT_LEFT_CORNER }, { name: FACES.BOTTOM_BACK_LEFT_CORNER }
+];
+const EDGE_FACES = [
+  { name: FACES.TOP_FRONT_EDGE }, { name: FACES.TOP_RIGHT_EDGE }, { name: FACES.TOP_BACK_EDGE }, { name: FACES.TOP_LEFT_EDGE },
+  { name: FACES.BOTTOM_BACK_EDGE }, { name: FACES.BOTTOM_RIGHT_EDGE }, { name: FACES.BOTTOM_FRONT_EDGE }, { name: FACES.BOTTOM_LEFT_EDGE },
+];
+const EDGE_FACES_SIDE = [
+  { name: FACES.FRONT_RIGHT_EDGE }, { name: FACES.BACK_RIGHT_EDGE }, { name: FACES.BACK_LEFT_EDGE }, { name: FACES.FRONT_LEFT_EDGE }
+];
+const CUBE_FACES = [...BOX_FACES, ...CORNER_FACES, ...EDGE_FACES, ...EDGE_FACES_SIDE];
+
